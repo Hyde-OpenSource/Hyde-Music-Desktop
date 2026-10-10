@@ -16,6 +16,7 @@ import '../../design/widgets/elastic_slider.dart';
 import '../../engine/models.dart';
 import '../../state/providers.dart';
 import 'artwork_palette.dart';
+import 'lyrics_clock.dart';
 import 'lyrics_view.dart';
 import 'player_actions.dart';
 import 'queue_view.dart';
@@ -433,7 +434,6 @@ class LyricsPane extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lyrics = ref.watch(lyricsProvider(track.id));
-    final pos = ref.watch(nowPlayingProvider.select((s) => s.position));
     final settings = ref.watch(settingsProvider).value ?? const {};
     final appearance = LyricsAppearance(
       align: switch (settings['lyricsTextPosition']) {
@@ -447,11 +447,13 @@ class LyricsPane extends ConsumerWidget {
       glow: settings['lyricsGlowEffect'] as bool? ?? false,
     );
     return lyrics.when(
-      data: (l) => LyricsView(
-        lyrics: l,
-        position: pos,
-        appearance: appearance,
-        onSeek: (settings['lyricsClick'] as bool? ?? true) ? ref.read(engineProvider).seek : (_) async {},
+      data: (l) => _LyricsClockScope(
+        builder: (context, clock) => LyricsView(
+          lyrics: l,
+          clock: clock,
+          appearance: appearance,
+          onSeek: (settings['lyricsClick'] as bool? ?? true) ? ref.read(engineProvider).seek : (_) async {},
+        ),
       ),
       loading: () => const Center(child: CupertinoActivityIndicator(color: Color(0xFFFFFFFF))),
       error: (e, _) => Center(
@@ -614,5 +616,39 @@ class _ArtworkGesturesState extends State<_ArtworkGestures> with TickerProviderS
         );
       },
     );
+  }
+}
+
+/// Gives the lyrics a [LyricsClock] fed by the engine's position reports.
+/// It never rebuilds on a report: line changes are timed by the view and
+/// per-frame motion listens to [LyricsClock.frames].
+class _LyricsClockScope extends ConsumerStatefulWidget {
+  const _LyricsClockScope({required this.builder});
+  final Widget Function(BuildContext context, LyricsClock clock) builder;
+
+  @override
+  ConsumerState<_LyricsClockScope> createState() => _LyricsClockScopeState();
+}
+
+class _LyricsClockScopeState extends ConsumerState<_LyricsClockScope> {
+  final _clock = LyricsClock();
+
+  @override
+  void initState() {
+    super.initState();
+    final s = ref.read(nowPlayingProvider);
+    _clock.report(s.position, s.isPlaying);
+  }
+
+  @override
+  void dispose() {
+    _clock.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(nowPlayingProvider.select((s) => (s.position, s.isPlaying)), (_, n) => _clock.report(n.$1, n.$2));
+    return widget.builder(context, _clock);
   }
 }

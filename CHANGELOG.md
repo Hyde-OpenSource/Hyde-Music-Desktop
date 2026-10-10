@@ -21,3 +21,4 @@ First release for Windows and Linux.
 
 ### Fixed
 - Home failed on a fresh library ("Cannot modify an unmodifiable list").
+- Lyrics change lines exactly on time; word fill and interlude dots animate in step with the display, and only the active line repaints.

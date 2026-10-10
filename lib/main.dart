@@ -23,6 +23,11 @@ const _engineMode = String.fromEnvironment('HYDE_ENGINE', defaultValue: 'dart');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Artwork is decoded at display size, so a smaller cache holds every
+  // visible cover with less memory churn.
+  PaintingBinding.instance.imageCache
+    ..maximumSize = 300
+    ..maximumSizeBytes = 64 << 20;
   await GlassShader.preload();
 
   // Edge-to-edge; glass chrome floats over content.

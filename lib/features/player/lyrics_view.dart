@@ -3,11 +3,13 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/physics.dart';
 
 import '../../core/motion/hyde_motion.dart';
 import '../../core/theme/hyde_theme.dart';
 import '../../engine/models.dart';
+import 'lyrics_clock.dart';
 
 /// Options mapped from the native lyrics preferences
 /// (lyricsTextPosition, lyricsTextSize, lyricsLineSpacing,
@@ -32,13 +34,17 @@ class LyricsView extends StatefulWidget {
   const LyricsView({
     super.key,
     required this.lyrics,
-    required this.position,
+    this.clock,
+    this.position = Duration.zero,
     required this.onSeek,
     this.appearance = const LyricsAppearance(),
     this.topInset = 24,
   });
 
   final Lyrics lyrics;
+
+  /// Live playback clock; without one the view shows the fixed [position].
+  final LyricsClock? clock;
   final Duration position;
   final ValueChanged<Duration> onSeek;
   final LyricsAppearance appearance;
@@ -63,24 +69,40 @@ class _LyricsViewState extends State<LyricsView> with SingleTickerProviderStateM
   bool _userScrolling = false;
   Timer? _resumeTimer;
 
+  /// Fires at the next line's start time: exact line changes without polling.
+  Timer? _boundary;
+
+  Duration get _now => widget.clock?.now ?? widget.position;
+
   @override
   void initState() {
     super.initState();
     _keys = List.generate(widget.lyrics.lines.length, (_) => GlobalKey());
+    widget.clock?.addListener(_onJump);
   }
 
   @override
   void didUpdateWidget(LyricsView old) {
     super.didUpdateWidget(old);
+    if (old.clock != widget.clock) {
+      old.clock?.removeListener(_onJump);
+      widget.clock?.addListener(_onJump);
+    }
     if (old.lyrics != widget.lyrics) {
       _keys = List.generate(widget.lyrics.lines.length, (_) => GlobalKey());
       _active = -1;
     }
-    _syncActive();
+  }
+
+  /// Seek, play or pause: re-sync the active line and its timer.
+  void _onJump() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    widget.clock?.removeListener(_onJump);
+    _boundary?.cancel();
     _resumeTimer?.cancel();
     _scrollAnim.dispose();
     _scroll.dispose();
@@ -104,10 +126,22 @@ class _LyricsViewState extends State<LyricsView> with SingleTickerProviderStateM
 
   void _syncActive() {
     if (!widget.lyrics.synced) return;
-    final i = _indexFor(widget.position);
+    final now = _now;
+    final i = _indexFor(now);
+    _scheduleBoundary(i, now);
     if (i == _active) return;
     _active = i;
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToActive());
+  }
+
+  void _scheduleBoundary(int active, Duration now) {
+    _boundary?.cancel();
+    final clock = widget.clock;
+    final lines = widget.lyrics.lines;
+    if (clock == null || !clock.playing || active + 1 >= lines.length) return;
+    final wait = lines[active + 1].start - now;
+    // A few ms late rather than early, so the new line is already current.
+    _boundary = Timer(wait.isNegative ? Duration.zero : wait + const Duration(milliseconds: 4), _onJump);
   }
 
   void _scrollToActive() {
@@ -179,7 +213,8 @@ class _LyricsViewState extends State<LyricsView> with SingleTickerProviderStateM
                     line: lyrics.lines[i],
                     distance: lyrics.synced ? (i - _active) : 0,
                     active: lyrics.synced && i == _active,
-                    position: widget.position,
+                    position: _now,
+                    frames: widget.clock?.frames,
                     nextStart: i + 1 < lyrics.lines.length ? lyrics.lines[i + 1].start : null,
                     appearance: a,
                     focusAll: _userScrolling || !lyrics.synced,
@@ -200,6 +235,7 @@ class _LyricLineView extends StatelessWidget {
     required this.distance,
     required this.active,
     required this.position,
+    required this.frames,
     required this.nextStart,
     required this.appearance,
     required this.focusAll,
@@ -209,7 +245,11 @@ class _LyricLineView extends StatelessWidget {
   final LyricLine line;
   final int distance;
   final bool active;
+
+  /// Position when the line was built; [frames] drives the active line's
+  /// per-frame parts (word fill, interlude dots).
   final Duration position;
+  final ValueListenable<Duration>? frames;
   final Duration? nextStart;
   final LyricsAppearance appearance;
   final bool focusAll;
@@ -228,36 +268,49 @@ class _LyricLineView extends StatelessWidget {
       shadows: active && a.glow ? const [Shadow(color: Color(0x88FFFFFF), blurRadius: 18)] : null,
     );
 
-    final Widget text;
-    if (line.text.trim().isEmpty) {
-      text = active
-          ? _InterludeDots(start: line.start, end: nextStart, position: position)
-          : const SizedBox(height: 12);
-    } else if (active && line.words.isNotEmpty) {
-      text = Text.rich(
-        TextSpan(
-          children: [
-            for (final w in line.words)
-              TextSpan(
-                text: w.text,
-                style: style.copyWith(
-                  color: Color.lerp(
-                    const Color(0x66FFFFFF),
-                    const Color(0xFFFFFFFF),
-                    ((position - w.start).inMilliseconds / math.max(1, (w.end - w.start).inMilliseconds)).clamp(
-                      0.0,
-                      1.0,
+    Widget textAt(Duration position) {
+      final Widget text;
+      if (line.text.trim().isEmpty) {
+        text = active
+            ? _InterludeDots(start: line.start, end: nextStart, position: position)
+            : const SizedBox(height: 12);
+      } else if (active && line.words.isNotEmpty) {
+        text = Text.rich(
+          TextSpan(
+            children: [
+              for (final w in line.words)
+                TextSpan(
+                  text: w.text,
+                  style: style.copyWith(
+                    color: Color.lerp(
+                      const Color(0x66FFFFFF),
+                      const Color(0xFFFFFFFF),
+                      ((position - w.start).inMilliseconds / math.max(1, (w.end - w.start).inMilliseconds)).clamp(
+                        0.0,
+                        1.0,
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
-        ),
-        textAlign: a.align,
-      );
-    } else {
-      text = Text(line.text, style: style, textAlign: a.align);
+            ],
+          ),
+          textAlign: a.align,
+        );
+      } else {
+        text = Text(line.text, style: style, textAlign: a.align);
+      }
+      return text;
     }
+
+    // Only the active line moves between line changes, inside a repaint
+    // boundary so the other (blurred) lines are not redrawn every frame.
+    final animated = active && (line.text.trim().isEmpty || line.words.isNotEmpty);
+    final f = frames;
+    final Widget text = animated && f != null
+        ? RepaintBoundary(
+            child: ValueListenableBuilder<Duration>(valueListenable: f, builder: (context, pos, _) => textAt(pos)),
+          )
+        : textAt(position);
 
     final d = distance.abs();
     final opacity = focusAll ? 0.75 : (active ? 1.0 : (distance < 0 ? 0.32 : 0.38));
@@ -324,7 +377,9 @@ class _LyricLineView extends StatelessWidget {
   }
 }
 
-/// Three breathing dots during instrumental breaks.
+/// Three breathing dots during instrumental breaks: they light up one by
+/// one over the break, breathe gently, and shrink away just before the next
+/// line. Driven by the per-frame lyrics clock, so the motion is smooth.
 class _InterludeDots extends StatelessWidget {
   const _InterludeDots({required this.start, required this.end, required this.position});
   final Duration start;
@@ -333,28 +388,50 @@ class _InterludeDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = ((end ?? start + const Duration(seconds: 3)) - start).inMilliseconds;
-    final p = ((position - start).inMilliseconds / math.max(1, total)).clamp(0.0, 1.0);
-    final breathe = 1 + 0.12 * math.sin(position.inMilliseconds / 260);
-    return Transform.scale(
-      scale: breathe,
-      alignment: Alignment.centerLeft,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < 3; i++)
-            Padding(
-              padding: const EdgeInsets.only(right: 10, top: 12, bottom: 12),
-              child: Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color.fromRGBO(255, 255, 255, 0.3 + 0.7 * ((p * 3 - i).clamp(0.0, 1.0))),
-                ),
+    final stop = end ?? start + const Duration(seconds: 3);
+    final total = math.max(1, (stop - start).inMilliseconds);
+    final elapsed = (position - start).inMilliseconds;
+    final p = (elapsed / total).clamp(0.0, 1.0);
+    // Breathing: ~1.6 s period, small amplitude.
+    final breathe = 1 + 0.08 * math.sin(elapsed / 1600 * 2 * math.pi);
+    // Last 450 ms: shrink and fade out, handing over to the next line.
+    final left = (stop - position).inMilliseconds;
+    final exit = Curves.easeInCubic.transform((1 - left / 450).clamp(0.0, 1.0));
+    return Opacity(
+      opacity: 1 - exit,
+      child: Transform.scale(
+        scale: breathe * (1 - 0.6 * exit),
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < 3; i++)
+              Padding(
+                padding: const EdgeInsets.only(right: 10, top: 12, bottom: 12),
+                child: _Dot(lit: Curves.easeOutCubic.transform((p * 3 - i).clamp(0.0, 1.0))),
               ),
-            ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  const _Dot({required this.lit});
+  final double lit;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = 12 + 3 * lit;
+    return SizedBox.square(
+      dimension: 15,
+      child: Center(
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: Color.fromRGBO(255, 255, 255, 0.28 + 0.72 * lit)),
+        ),
       ),
     );
   }
