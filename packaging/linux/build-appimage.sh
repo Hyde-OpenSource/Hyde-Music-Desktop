@@ -46,7 +46,9 @@ ln -sf tech.hydeos.HydeMusic.png "$APPDIR/.DirIcon"
 
 # libmpv and every library it pulls in, except the base system ones that
 # must come from the user's distro (glibc, GPU drivers, audio server, GTK…).
-EXCLUDE='^(ld-linux|libc\.|libm\.|libdl\.|libpthread|librt\.|libresolv|libutil|libgcc_s|libstdc\+\+|libGL|libEGL|libGLX|libGLdispatch|libOpenGL|libdrm|libgbm|libvulkan|libX11|libXext\.|libXrender|libXfixes|libXi\.|libXrandr|libXcursor|libXinerama|libXau|libXdmcp|libXcomposite|libXdamage|libxcb|libxkb|libwayland|libasound|libpulse|libpipewire|libjack|libdbus|libsystemd|libudev|libcap\.|libfontconfig|libfreetype|libharfbuzz|libfribidi|libglib|libgio|libgobject|libgmodule|libgthread|libgtk|libgdk|libcairo|libpango|libatk|libatspi|libepoxy|libz\.so|libexpat|libuuid|libblkid|libmount|libselinux|libpcre|libffi|libgnutls|libnettle|libhogweed|libgmp|libp11-kit|libtasn1|libidn2|libunistring|libcrypto|libssl|libbz2|liblzma|libzstd|libsqlite3)'
+# Compression and crypto libraries (bz2, lzma, zstd, gnutls…) are bundled:
+# their file names differ between distros (libbz2.so.1.0 vs libbz2.so.1).
+EXCLUDE='^(ld-linux|libc\.|libm\.|libdl\.|libpthread|librt\.|libresolv|libutil|libgcc_s|libstdc\+\+|libGL|libEGL|libGLX|libGLdispatch|libOpenGL|libdrm|libgbm|libvulkan|libX11|libXext\.|libXrender|libXfixes|libXi\.|libXrandr|libXcursor|libXinerama|libXau|libXdmcp|libXcomposite|libXdamage|libxcb|libxkb|libwayland|libasound|libpulse|libpipewire|libjack|libdbus|libsystemd|libudev|libcap\.|libfontconfig|libfreetype|libharfbuzz|libfribidi|libglib|libgio|libgobject|libgmodule|libgthread|libgtk|libgdk|libcairo|libpango|libatk|libatspi|libepoxy|libz\.so|libexpat|libuuid|libblkid|libmount|libselinux|libpcre|libffi|libp11-kit)'
 cp -L "$LIBMPV" "$APPDIR/lib/$LIBMPV_SONAME"
 ldd "$LIBMPV" | awk '/=> \// {print $3}' | while read -r lib; do
   name="$(basename "$lib")"
