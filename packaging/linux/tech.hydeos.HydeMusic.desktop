@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Hyde Music
+GenericName=Music Player
+Comment=Free, ad-free music with Liquid Glass, AI Shuffle and synced lyrics
+Exec=hyde-music %U
+Icon=tech.hydeos.HydeMusic
+Terminal=false
+Categories=AudioVideo;Audio;Music;Player;
+Keywords=music;player;youtube;lyrics;shuffle;
+StartupWMClass=tech.hydeos.HydeMusic

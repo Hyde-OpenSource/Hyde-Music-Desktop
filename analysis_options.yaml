@@ -1,0 +1,20 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - windows/**
+    - linux/**
+  errors:
+    # The app is Cupertino-only; flag any Material import.
+    depend_on_referenced_packages: error
+
+formatter:
+  page_width: 120
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_initializing_formals: false
